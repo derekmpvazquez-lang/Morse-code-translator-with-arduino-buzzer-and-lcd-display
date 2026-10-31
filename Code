@@ -1,0 +1,116 @@
+#include <SoftwareSerial.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2); // si no muestra nada, prueba 0x3F
+SoftwareSerial bt(2, 3);            // RX = pin 2, TX = pin 3
+
+const int buzzer = 7;
+const int led = 13;
+const bool pasivo = false;          // false = buzzer activo, true = pasivo
+const int palabrasPorMinuto = 15;   // velocidad del Morse
+const int unidad = 1200 / palabrasPorMinuto;
+const unsigned long pausaNuevoMensaje = 3000; // ms sin recibir nada = mensaje nuevo
+
+const char* letras[] = {
+  ".-", "-...", "-.-.", "-..", ".", "..-.", "--.", "....", "..", ".---",
+  "-.-", ".-..", "--", "-.", "---", ".--.", "--.-", ".-.", "...", "-",
+  "..-", "...-", ".--", "-..-", "-.--", "--.."
+};
+
+const char* numeros[] = {
+  "-----", ".----", "..---", "...--", "....-",
+  ".....", "-....", "--...", "---..", "----."
+};
+
+String texto = "";
+bool mensajeNuevo = true;
+unsigned long ultimoCaracter = 0;
+
+void sonido(bool encendido) {
+  digitalWrite(led, encendido);
+  if (pasivo) {
+    if (encendido) tone(buzzer, 700);
+    else noTone(buzzer);
+  } else {
+    digitalWrite(buzzer, encendido);
+  }
+}
+
+void emitir(int ms) {
+  sonido(true);
+  delay(ms);
+  sonido(false);
+  delay(unidad);
+}
+
+void mostrarTexto(char c) {
+  texto += c;
+  if (texto.length() > 16) texto = texto.substring(texto.length() - 16);
+  lcd.setCursor(0, 0);
+  lcd.print(texto);
+  for (int i = texto.length(); i < 16; i++) lcd.print(' ');
+}
+
+void reproducir(const char* codigo) {
+  lcd.setCursor(0, 1);
+  lcd.print("                ");
+  lcd.setCursor(0, 1);
+  for (int i = 0; codigo[i] != '\0'; i++) {
+    lcd.print(codigo[i]);
+    if (codigo[i] == '.') emitir(unidad);
+    else emitir(unidad * 3);
+  }
+  delay(unidad * 2);
+}
+
+void procesar(char c) {
+  if (c == '\n' || c == '\r') {
+    mensajeNuevo = true;
+    return;
+  }
+
+  c = toupper(c);
+  bool valido = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ';
+  if (!valido) return;
+
+  if (millis() - ultimoCaracter > pausaNuevoMensaje) mensajeNuevo = true;
+
+  if (mensajeNuevo) {
+    texto = "";
+    lcd.clear();
+    mensajeNuevo = false;
+  }
+
+  mostrarTexto(c);
+
+  if (c == ' ') {
+    delay(unidad * 4);
+  } else if (c >= 'A' && c <= 'Z') {
+    reproducir(letras[c - 'A']);
+  } else {
+    reproducir(numeros[c - '0']);
+  }
+
+  ultimoCaracter = millis();
+}
+
+void setup() {
+  pinMode(8, OUTPUT);
+  digitalWrite(8, HIGH); // alimenta la LCD
+  delay(200);
+
+  pinMode(buzzer, OUTPUT);
+  pinMode(led, OUTPUT);
+  Serial.begin(9600);
+  bt.begin(9600);
+  lcd.init();
+  lcd.backlight();
+  lcd.print("Morse listo");
+  bt.println("Escribe un texto y lo reproduzco en Morse");
+}
+
+void loop() {
+  if (bt.available()) procesar(bt.read());
+  if (Serial.available()) procesar(Serial.read());
+}
